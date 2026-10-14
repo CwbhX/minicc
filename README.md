@@ -46,7 +46,7 @@ remote Mac's Thunderbolt Bridge address; use your own SSH alias or address.
 On the main Mac:
 
 ```sh
-git clone https://github.com/CwbhX/distcc.git && cd distcc
+git clone https://github.com/CwbhX/minicc.git && cd minicc
 brew install autoconf automake pkgconf popt
 contrib/minicc install --helper remote-mac        # build and install on both Macs
 export PATH="$HOME/.local/minicc/bin:$PATH"
@@ -542,7 +542,7 @@ cycles. It has been used with hundreds of helpers and dozens of
 simultaneous compiles.
 
 - Upstream: <https://github.com/distcc/distcc>, <https://distcc.github.io/>
-- This fork: <https://github.com/CwbhX/distcc> (branch `mac-pool-perf`)
+- This fork: <https://github.com/CwbhX/minicc>
 
 ## Licence
 
