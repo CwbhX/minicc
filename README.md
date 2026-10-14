@@ -37,33 +37,76 @@ and `minicc helper install` retires the old LaunchAgent on the helper.
 
 ## Quick start
 
-The **main Mac** (the distcc client) runs your build. The **remote Mac**
-(the distcc helper) runs the compilation daemon. Connect them with a
-Thunderbolt 4 cable, enable Thunderbolt Bridge networking and Remote Login
-on the remote Mac, and check SSH access from the main Mac.
+The 5-minute copy-paste version. **TL;DR:** install minicc on both Macs
+once, run `minicc init` in your project once, then just run
+`minicc build` forever after.
 
-In these commands, `remote-mac` is an example SSH name pointing to the
-remote Mac's Thunderbolt Bridge address; use your own SSH alias or address.
-On the main Mac:
+Your **main Mac** runs the build. The **remote Mac** helps compile.
+You only ever type commands on the main Mac.
+
+### Before you start
+
+- [ ] Two Apple silicon Macs joined by a Thunderbolt 4 cable
+- [ ] Remote Mac: System Settings → General → Sharing → **Remote Login: on**
+- [ ] Both Macs: Xcode Command Line Tools (`xcode-select --install`)
+- [ ] You can `ssh remote-mac` from the main Mac without typing a password
+
+Only two things in the commands below are yours to replace:
+`remote-mac` (your SSH name for the remote Mac) and `build`
+(your project's build directory name).
+
+### Step 1 — Install minicc on both Macs (once)
 
 ```sh
 git clone https://github.com/CwbhX/minicc.git && cd minicc
 brew install autoconf automake pkgconf popt
-contrib/minicc install --helper remote-mac        # build and install on both Macs
-export PATH="$HOME/.local/minicc/bin:$PATH"
-
-cd ~/src/MyProject                               # a CMake + Ninja project
-minicc init --helper remote-mac --build build     # writes ~/.config/minicc/myproject.conf
-minicc helper install                     # starts the remote daemon (LaunchAgent)
-minicc doctor                             # checks that both Macs match
-minicc build                              # PCHs, sync, then use both Macs
+contrib/minicc install --helper remote-mac
+echo 'export PATH="$HOME/.local/minicc/bin:$PATH"' >> ~/.zshrc
+exec zsh   # reload your shell so `minicc` is on PATH
 ```
 
+Done when: `minicc --help` prints usage instead of "command not found".
+
+### Step 2 — Tell minicc about your project (once per project)
+
+```sh
+cd ~/src/MyProject        # your CMake + Ninja project
+minicc init --helper remote-mac --build build
+```
+
+Done when: it prints the slot counts it detected for each Mac
+(cores + 2 each — nothing to tune).
+
+### Step 3 — Start the helper and check the Macs match
+
+```sh
+minicc helper install
+minicc doctor
+```
+
+Done when: every line says `ok`. Anything marked `XX` comes with the
+exact command to fix it — run that, then run `doctor` again.
+
+### Step 4 — Test it, then build
+
+```sh
+minicc test -n 10    # builds 10 files on the remote Mac, compares bytes
+minicc build         # the real build, on both Macs
+```
+
+Done when: `test` reports the files as mirrored. If some fall back to
+classic mode instead, the output says why (usually: run `minicc doctor`).
+
+**Every day after this:** just `minicc build` in your project.
+That is the whole workflow.
+
+Stuck at any point? Run `minicc doctor` first — it checks both Macs and
+prints fixes. [`Troubleshooting`](#troubleshooting) covers the rest.
+
 Every step works out the details itself (addresses, slot counts, ccache,
-build directories behind symlinks), and `doctor` tells you what to fix.
-`init` detects each Mac's logical core count, starts with cores + 2 compile
-slots on each, and `build` uses their combined slot count. Manual slot
-overrides are optional; no Mac model selects a different policy.
+build directories behind symlinks). `init` detects each Mac's logical core
+count and starts with cores + 2 compile slots on each; manual slot
+overrides are optional, and no Mac model selects a different policy.
 
 ## What's new in this fork
 
