@@ -38,10 +38,10 @@ at its bridge address so compilation and synchronization use that link.
 On the main Mac, from the project directory:
 
 ```sh
-distcc-mirror init --helper remote-mac --build build
-distcc-mirror helper install
-distcc-mirror doctor
-distcc-mirror build
+minicc init --helper remote-mac --build build
+minicc helper install
+minicc doctor
+minicc build
 ```
 
 `init` queries logical cores on the main Mac and over SSH on the remote,
@@ -680,7 +680,7 @@ cases were skipped (missing `/usr/include`, unavailable gdb, and an
 assembler-specific case). `make install-programs DESTDIR=...` also placed
 the observer in the configured library directory in a temporary staging tree.
 
-The focused tests are `test/test_distcc_mirror.py` (compile/comparison exit
+The focused tests are `test/test_minicc.py` (compile/comparison exit
 status, capacity detection and combined build budgets),
 `test/test_mirror_sync_rsh.py` (transport selection and quoting,
 using fake remote commands), and `test/test_mirror_trace.py` (actual macOS
@@ -891,8 +891,8 @@ read-only:
 This records the benchmark project configuration, including its explicit
 slot overrides and SSH alias. It is not the generic setup procedure.
 Nothing in Ohmly was changed. Everything below was driven by
-`contrib/distcc-mirror` (installed as `~/.local/distcc-mirror/bin/distcc-mirror`)
-and its config `~/.config/distcc-mirror/ohmly.conf`:
+`contrib/minicc` (installed as `~/.local/minicc/bin/minicc`)
+and its config `~/.config/minicc/ohmly.conf`:
 
 ```sh
 ROOTS=~/Git/Ohmly
@@ -903,23 +903,23 @@ HELPERS="m6=172.31.250.2/14"
 LOCAL_JOBS=17
 PORT=3634
 CLIENT_ADDR=172.31.250.1
-PREFIX=~/.local/distcc-mirror
-CCACHE_PREFIX=~/.local/distcc-mirror/bin/distcc
+PREFIX=~/.local/minicc
+CCACHE_PREFIX=~/.local/minicc/bin/distcc
 ```
 
-It was written by `distcc-mirror init --helper m6=172.31.250.2/14 --build
+It was written by `minicc init --helper m6=172.31.250.2/14 --build
 build-dev --local-jobs 17 --exclude output:tmp --extra ...`. The
 environment it gives is the one the benchmark set by hand, with
 `DISTCC_MIRROR_PATHMAP` derived from the `BUILD_DIR` symlink. A build is
 
 ```sh
-cd ~/Git/Ohmly && distcc-mirror build        # PCHs, sync, ninja -j31
+cd ~/Git/Ohmly && minicc build        # PCHs, sync, ninja -j31
 ```
 
-`distcc-mirror helper install` replaces the hand-started M6 daemon (port
+`minicc helper install` replaces the hand-started M6 daemon (port
 3634, `--jobs 14`, `--mirror-root ~/Git/Ohmly`) with a LaunchAgent
-(`local.distcc-mirror.distccd.3634`), next to the Homebrew one on 3632.
-`distcc-mirror doctor` checks both Macs, and `distcc-mirror test` compiles
+(`local.minicc.distccd.3634`), next to the Homebrew one on 3632.
+`minicc doctor` checks both Macs, and `minicc test` compiles
 random Ohmly TUs on the M6 and compares them with local compiles: 6 of 6
 mirrored and byte-identical, and 4 of 4 PCH TUs through ccache with
 `CCACHE_PREFIX` pointing at distcc directly.

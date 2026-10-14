@@ -10,8 +10,8 @@
 #
 # On the main Mac, configure its remote Mac over the Thunderbolt 4 bridge:
 #
-#   distcc-mirror init --helper remote-mac --build build
-#   eval "$(distcc-mirror env)"
+#   minicc init --helper remote-mac --build build
+#   eval "$(minicc env)"
 #   mirror-build.sh build
 #
 # remote-mac is any SSH name/address for the remote role. init detects each

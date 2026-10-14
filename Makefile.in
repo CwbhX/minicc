@@ -124,7 +124,7 @@ dist_contrib = contrib/distcc-absolutify	\
 	contrib/distccd-init		\
 	contrib/distccd-on-servers	\
 	contrib/dmake			\
-	contrib/distcc-mirror		\
+	contrib/minicc		\
 	contrib/mirror-build.sh		\
 	contrib/make-j			\
 	contrib/netpwd			\
@@ -206,7 +206,7 @@ man8dir = $(mandir)/man8
 test_SOURCE = test/comfychair.py \
 	test/onetest.py \
 	test/testdistcc.py \
-	test/test_distcc_mirror.py \
+	test/test_minicc.py \
 	test/test_mirror_sync_rsh.py \
 	test/test_mirror_trace.py \
 	find_c_extension.sh
@@ -795,7 +795,7 @@ pump-maintainer-check: pump include-server check_programs
 # server exists, then carry out distcc-maintainer-check in pump-mode.
 # The pump-mode checks are left out with --disable-pump-mode.
 mirror-tools-check: distcc $(MIRROR_TRACE_LIBRARY)
-	$(PYTHON) "$(srcdir)/test/test_distcc_mirror.py"
+	$(PYTHON) "$(srcdir)/test/test_minicc.py"
 	DISTCC_TEST_BINARY="$(builddir)/distcc" \
 	  $(PYTHON) "$(srcdir)/test/test_mirror_sync_rsh.py"
 	DISTCC_MIRROR_TRACE_LIBRARY="$(abspath $(MIRROR_TRACE_LIBRARY))" \
@@ -1082,7 +1082,8 @@ install-programs: $(bin_PROGRAMS) $(sbin_PROGRAMS) $(MIRROR_TRACE_LIBRARY)
 	for p in $(bin_PROGRAMS); do \
 	  $(INSTALL_PROGRAM) "$$p" "$(DESTDIR)$(bindir)" || exit 1; \
 	done
-	$(INSTALL_SCRIPT) "$(srcdir)/contrib/distcc-mirror" "$(DESTDIR)$(bindir)"
+	$(INSTALL_SCRIPT) "$(srcdir)/contrib/minicc" "$(DESTDIR)$(bindir)"
+	ln -sf minicc "$(DESTDIR)$(bindir)/distcc-mirror"
 	for p in $(sbin_PROGRAMS); do \
 	  $(INSTALL_PROGRAM) "$$p" "$(DESTDIR)$(sbindir)" || exit 1; \
 	done
@@ -1213,7 +1214,7 @@ uninstall-programs:
 	for p in $(MIRROR_TRACE_LIBRARY); do \
 	  rm -f "$(DESTDIR)$(libdir)/$$p"; \
 	done
-	for p in $(bin_PROGRAMS) pump distcc-mirror; do		\
+	for p in $(bin_PROGRAMS) pump minicc distcc-mirror; do	\
 	  file="$(DESTDIR)$(bindir)/`basename $$p`";            \
 	  if [ -e "$$file" ]; then rm -fv "$$file"; fi          \
 	done

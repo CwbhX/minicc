@@ -10,7 +10,7 @@ dnl Process this file with autoconf to produce a configure script
 
 # As of 0.6cvs, distcc no longer uses automake, only autoconf.
 AC_PREREQ([2.71])
-AC_INIT([distcc],[3.4],[https://github.com/distcc/distcc])
+AC_INIT([minicc],[3.4-minicc.1],[https://github.com/CwbhX/distcc])
 
 AC_CONFIG_HEADERS(src/config.h)
 AC_CONFIG_MACRO_DIRS([m4])

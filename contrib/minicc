@@ -12,9 +12,9 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
-"""distcc-mirror: set up and run distcc's mirrored-tree mode.
+"""minicc: set up and run distcc's mirrored-tree mode.
 
-One config file per project (~/.config/distcc-mirror/<name>.conf) holds
+One config file per project (~/.config/minicc/<name>.conf) holds
 everything: the source roots, the build directory, the helpers.  The
 commands below read it, so no environment variables have to be set by hand.
 
@@ -24,18 +24,18 @@ use any supported Mac model; slot counts come from detected cores.
 
 Getting started, on the main Mac (remote-mac is your remote SSH name):
 
-  contrib/distcc-mirror install --helper remote-mac  install on both Macs
-  distcc-mirror init --helper remote-mac --build build  detect cores and configure
-  distcc-mirror helper install                    start the remote daemon (LaunchAgent)
-  distcc-mirror doctor                            check both machines match
-  distcc-mirror build                             PCHs, sync, ninja
+  contrib/minicc install --helper remote-mac  install on both Macs
+  minicc init --helper remote-mac --build build  detect cores and configure
+  minicc helper install                    start the remote daemon (LaunchAgent)
+  minicc doctor                            check both machines match
+  minicc build                             PCHs, sync, ninja
 
 Commands:
   install      build distcc from this source tree, install it here and on
                the helpers
   init         write a config for a project
   show         print the config and the environment it gives
-  env          print export lines:  eval "$(distcc-mirror env)"
+  env          print export lines:  eval "$(minicc env)"
   run CMD...   run a command with that environment
   shell        start a shell with that environment
   sync         copy the tree to the helpers (distcc --mirror-sync)
@@ -48,7 +48,7 @@ Commands:
   brew-parity  compare Homebrew between this machine and the helpers, and
                copy missing kegs
 
-Run "distcc-mirror COMMAND --help" for the options of each command.
+Run "minicc COMMAND --help" for the options of each command.
 """
 
 import argparse
@@ -69,10 +69,12 @@ import time
 
 HOME = os.path.expanduser("~")
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME")
-                          or os.path.join(HOME, ".config"), "distcc-mirror")
-DEFAULT_PREFIX = os.path.join(HOME, ".local", "distcc-mirror")
+                          or os.path.join(HOME, ".config"), "minicc")
+# Configs written before the minicc rename; read as a fallback, never written.
+LEGACY_CONFIG_DIR = os.path.join(os.path.dirname(CONFIG_DIR), "distcc-mirror")
+DEFAULT_PREFIX = os.path.join(HOME, ".local", "minicc")
 DEFAULT_PORT = 3634
-LABEL_BASE = "local.distcc-mirror.distccd"
+LABEL_BASE = "local.minicc.distccd"
 WHITELIST = ("cc", "c++", "gcc", "g++", "clang", "clang++")
 BREW = "/opt/homebrew"
 
@@ -306,6 +308,10 @@ class Config:
         path = os.environ.get("PATH", "")
         parts = [p for p in path.split(":") if p and p != self.bindir()]
         e["PATH"] = ":".join([self.bindir()] + parts)
+        # Keep this fork's hosts/locks/state out of a stock distcc's
+        # ~/.distcc, unless the environment or config says otherwise.
+        e["DISTCC_DIR"] = os.environ.get("DISTCC_DIR") \
+            or os.path.join(HOME, ".minicc")
         e["DISTCC_HOSTS"] = self.hosts()
         e["DISTCC_MIRROR_ROOTS"] = ":".join(self.roots)
         e["DISTCC_MIRROR_EXCLUDE"] = self.exclude
@@ -328,13 +334,23 @@ class Config:
 
 
 def all_config_paths():
-    return sorted(glob.glob(os.path.join(CONFIG_DIR, "*.conf")))
+    paths = sorted(glob.glob(os.path.join(CONFIG_DIR, "*.conf")))
+    names = {os.path.basename(p) for p in paths}
+    for p in sorted(glob.glob(os.path.join(LEGACY_CONFIG_DIR, "*.conf"))):
+        if os.path.basename(p) not in names:
+            paths.append(p)
+    return paths
 
 
 def config_path_for(name):
     if os.sep in name or name.endswith(".conf"):
         return os.path.abspath(os.path.expanduser(name))
-    return os.path.join(CONFIG_DIR, name + ".conf")
+    path = os.path.join(CONFIG_DIR, name + ".conf")
+    if not os.path.exists(path):
+        legacy = os.path.join(LEGACY_CONFIG_DIR, name + ".conf")
+        if os.path.exists(legacy):
+            return legacy
+    return path
 
 
 def load_config(args, required=True):
@@ -351,7 +367,7 @@ def load_config(args, required=True):
     if not paths:
         if not required:
             return None
-        die("no config in %s; create one with: distcc-mirror init"
+        die("no config in %s; create one with: minicc init"
             % tilde(CONFIG_DIR))
     if len(paths) == 1:
         return Config(paths[0])
@@ -607,10 +623,15 @@ def cmd_install(args):
         die("%s/bin/distccd is missing; run without --no-build" % prefix)
     make_whitelist(prefix)
     me = os.path.realpath(__file__)
-    dest = os.path.join(prefix, "bin", "distcc-mirror")
+    dest = os.path.join(prefix, "bin", "minicc")
     if os.path.realpath(dest) != me:
         shutil.copy2(me, dest)
-    info("  distcc, distccd, distcc-mirror and the compiler whitelist "
+    # The pre-rename name, kept working for old scripts and shell history.
+    alias = os.path.join(prefix, "bin", "distcc-mirror")
+    if os.path.lexists(alias):
+        os.unlink(alias)
+    os.symlink("minicc", alias)
+    info("  distcc, distccd, minicc and the compiler whitelist "
          "(%s)" % ", ".join(WHITELIST))
 
     for h in helpers:
@@ -625,7 +646,7 @@ def cmd_install(args):
             if "restarted" in r.stdout:
                 info("  restarted the helper daemon on %s" % h)
             else:
-                info("  no LaunchAgent on %s yet: distcc-mirror helper "
+                info("  no LaunchAgent on %s yet: minicc helper "
                      "install" % h)
 
     path_dirs = os.environ.get("PATH", "").split(":")
@@ -635,7 +656,7 @@ def cmd_install(args):
         info('  echo \'export PATH="%s:$PATH"\' >> ~/.zshrc'
              % os.path.join(prefix, "bin").replace(HOME, "$HOME"))
     if not cfg:
-        info("Next: distcc-mirror init --helper HOST --build BUILD_DIR")
+        info("Next: minicc init --helper HOST --build BUILD_DIR")
 
 
 # ---------------------------------------------------------------- init
@@ -751,7 +772,7 @@ def cmd_init(args):
                      "-DCMAKE_CXX_COMPILER_LAUNCHER=distcc %s" % tilde(build))
 
     lines = [
-        "# distcc-mirror config for %s (written by distcc-mirror init on %s)."
+        "# minicc config for %s (written by minicc init on %s)."
         % (name, time.strftime("%Y-%m-%d")),
         "# KEY=VALUE lines; ~ and $VARS are expanded.  Keys not listed here",
         "# are exported to the build as they are.",
@@ -788,8 +809,8 @@ def cmd_init(args):
     info("\n".join("  " + l for l in lines if l and not l.startswith("#")))
     for n in notes:
         info("\nNote: " + n)
-    info("\nNext:\n  distcc-mirror helper install    # start the daemon on "
-         "the helpers\n  distcc-mirror doctor\n  distcc-mirror build")
+    info("\nNext:\n  minicc helper install    # start the daemon on "
+         "the helpers\n  minicc doctor\n  minicc build")
 
 
 # ---------------------------------------------------------------- show/env
@@ -829,7 +850,7 @@ def cmd_run(args):
     if cmd and cmd[0] == "--":
         cmd = cmd[1:]
     if not cmd:
-        die("usage: distcc-mirror run COMMAND [ARGS...]")
+        die("usage: minicc run COMMAND [ARGS...]")
     env = cfg.full_env()
     os.execvpe(cmd[0], cmd, env)
 
@@ -839,7 +860,7 @@ def cmd_shell(args):
     env = cfg.full_env()
     env["DISTCC_MIRROR_CONFIG"] = cfg.path
     sh = os.environ.get("SHELL", "/bin/sh")
-    info("distcc-mirror: %s environment (exit to leave); ninja -j%d"
+    info("minicc: %s environment (exit to leave); ninja -j%d"
          % (cfg.name, cfg.total_jobs()))
     os.execvpe(sh, [sh], env)
 
@@ -848,7 +869,7 @@ def cmd_shell(args):
 
 def do_sync(cfg, hosts=()):
     if not os.path.exists(cfg.distcc()):
-        die("%s is missing; run distcc-mirror install" % cfg.distcc())
+        die("%s is missing; run minicc install" % cfg.distcc())
     r = subprocess.run([cfg.distcc(), "--mirror-sync"] + list(hosts),
                        env=cfg.full_env())
     if r.returncode != 0:
@@ -901,7 +922,7 @@ def cmd_build(args):
     step("Building (%s)" % (" ".join(jobs + rest) or "all"))
     r = subprocess.run(tool + jobs + rest, env=env)
     t2 = time.time()
-    info("\ndistcc-mirror: preparation %.1fs, build %.1fs, total %.1fs"
+    info("\nminicc: preparation %.1fs, build %.1fs, total %.1fs"
          % (t1 - t0, t2 - t1, t2 - t0))
     sys.exit(r.returncode)
 
@@ -991,7 +1012,7 @@ def cmd_test(args):
         die("no such helper")
     h = helpers[0]
     if not port_open(h.addr, h.port):
-        die("%s:%d does not answer; start it with: distcc-mirror helper "
+        die("%s:%d does not answer; start it with: minicc helper "
             "install" % (h.addr, h.port))
     env = cfg.full_env()
     env.pop("DISTCC_LOG", None)
@@ -1000,7 +1021,7 @@ def cmd_test(args):
     step("Compiling %d file(s) on %s through the mirror%s"
          % (len(pick), h.ssh, "" if args.no_compare
             else ", and locally to compare"))
-    tmp = tempfile.mkdtemp(prefix="distcc-mirror-test.")
+    tmp = tempfile.mkdtemp(prefix="minicc-test.")
     counts = {}
     different = 0
     compile_failed = 0
@@ -1064,8 +1085,8 @@ def cmd_test(args):
         info("%d local comparison compile(s) failed" % comparison_failed)
     if counts.get("mirrored", 0) < len(pick) - compile_failed:
         info("Some jobs compiled successfully using classic distcc.  If\n"
-             "many are rejected, run distcc-mirror sync, "
-             "then distcc-mirror doctor.")
+             "many are rejected, run minicc sync, "
+             "then minicc doctor.")
     failures = []
     if compile_failed:
         failures.append("%d distcc compile(s) failed" % compile_failed)
@@ -1088,13 +1109,13 @@ def cmd_doctor(args):
     distcc = cfg.distcc()
     if lf.get("distcc") == "missing" or lf.get("distccd") == "missing":
         rep.fail("distcc is not installed in %s" % tilde(cfg.prefix),
-                 "contrib/distcc-mirror install (from the distcc source tree)")
+                 "contrib/minicc install (from the distcc source tree)")
     else:
         h = subprocess.run([distcc, "--help"], capture_output=True,
                            text=True)
         if "--mirror-sync" not in (h.stdout + h.stderr):
             rep.fail("%s has no mirror mode" % tilde(distcc),
-                     "contrib/distcc-mirror install")
+                     "contrib/minicc install")
         else:
             rep.ok("distcc with mirror mode in %s" % tilde(cfg.bindir()))
     for d in lf.all("dir_missing"):
@@ -1147,17 +1168,17 @@ def cmd_doctor(args):
                      % (hf.get("arch"), lf.get("arch")))
         if hf.get("distccd") == "missing":
             rep.fail("distcc is not installed on %s" % h.ssh,
-                     "distcc-mirror install --no-build --helper " + h.ssh)
+                     "minicc install --no-build --helper " + h.ssh)
         elif hf.get("distccd") != lf.get("distccd"):
             rep.warn("its distccd differs from this machine's build",
-                     "distcc-mirror install --no-build --helper " + h.ssh)
+                     "minicc install --no-build --helper " + h.ssh)
         else:
             rep.ok("same distcc build as here")
         wl = hf.get("whitelist").split()
         if not {"clang", "clang++"} <= set(wl):
             rep.fail("the compiler whitelist (%s/lib/distcc) lacks clang"
                      % tilde(cfg.prefix),
-                     "distcc-mirror install --no-build --helper " + h.ssh)
+                     "minicc install --no-build --helper " + h.ssh)
         if not hf.get("clang"):
             rep.fail("no clang (Command Line Tools) on %s" % h.ssh)
         elif hf.get("clang") != lf.get("clang"):
@@ -1173,27 +1194,27 @@ def cmd_doctor(args):
                      % (hf.get("sdk"), lf.get("sdk")))
         missing = hf.all("dir_missing")
         for d in missing:
-            fix = "distcc-mirror sync" if d in cfg.roots + cfg.extra else None
+            fix = "minicc sync" if d in cfg.roots + cfg.extra else None
             rep.fail("%s is missing there" % tilde(d), fix)
         if not missing:
-            rep.ok("roots and extra trees are present (run distcc-mirror "
+            rep.ok("roots and extra trees are present (run minicc "
                    "sync before building)")
 
         daemon = hf.get("daemon")
         agent = hf.get("agent")
         if not daemon:
             rep.fail("no daemon on port %d" % h.port,
-                     "distcc-mirror helper install")
+                     "minicc helper install")
         else:
             roots_missing = [r for r in cfg.roots
                              if "--mirror-root %s" % r not in daemon]
             if roots_missing:
                 rep.fail("the daemon does not serve %s"
                          % " ".join(tilde(r) for r in roots_missing),
-                         "distcc-mirror helper install")
+                         "minicc helper install")
             elif agent in ("none", ""):
                 rep.warn("the daemon was started by hand and will not "
-                         "survive a reboot", "distcc-mirror helper install")
+                         "survive a reboot", "minicc helper install")
             else:
                 rep.ok("daemon running (LaunchAgent %s)" % label(h.port))
         if port_open(h.addr, h.port):
@@ -1214,7 +1235,7 @@ def cmd_doctor(args):
             if noopt:
                 rep.warn("%d kegs are there but have no /opt/homebrew/opt "
                          "link (%s)" % (len(noopt), ", ".join(noopt)),
-                         "distcc-mirror brew-parity --apply")
+                         "minicc brew-parity --apply")
             inc_l = set(lf.get("include").split())
             inc_h = set(hf.get("include").split())
             if miss or diff:
@@ -1226,7 +1247,7 @@ def cmd_doctor(args):
                              len(diff), (" (%s)" % ", ".join(
                                  "%s %s/%s" % (n, lk[n], hk[n])
                                  for n in diff[:4])) if diff else ""),
-                         "distcc-mirror brew-parity  (jobs reading those "
+                         "minicc brew-parity  (jobs reading those "
                          "headers fall back)")
             else:
                 rep.ok("Homebrew: the same %d formulae at the same versions"
@@ -1298,8 +1319,14 @@ stop_by_hand() {
 }
 case "$ACTION" in
 install)
-  [ -x "$PREFIX/bin/distccd" ] || { echo "$PREFIX/bin/distccd is missing: run distcc-mirror install" >&2; exit 3; }
+  [ -x "$PREFIX/bin/distccd" ] || { echo "$PREFIX/bin/distccd is missing: run minicc install" >&2; exit 3; }
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+  # Retire the pre-rename agent for this port so two daemons do not race.
+  legacy="local.distcc-mirror.distccd.$PORT"
+  if [ "$LABEL" != "$legacy" ]; then
+    launchctl bootout "gui/$uid/$legacy" 2>/dev/null
+    rm -f "$HOME/Library/LaunchAgents/$legacy.plist"
+  fi
   # distccd refuses a --mirror-root that does not exist; the sync fills it.
   for r in "$@"; do mkdir -p "$r"; done
   unload
@@ -1315,7 +1342,7 @@ install)
   tail -n 15 "$LOG" >&2
   exit 5;;
 start)
-  [ -f "$PLIST" ] || { echo "not installed: distcc-mirror helper install" >&2; exit 3; }
+  [ -f "$PLIST" ] || { echo "not installed: minicc helper install" >&2; exit 3; }
   if loaded; then launchctl kickstart "gui/$uid/$LABEL"; else launchctl bootstrap "gui/$uid" "$PLIST"; fi && echo "started";;
 stop) unload; echo "stopped";;
 restart) launchctl kickstart -k "gui/$uid/$LABEL" && echo "restarted";;
@@ -1335,8 +1362,8 @@ esac
 
 def log_name(port):
     if port == DEFAULT_PORT:
-        return "distccd-mirror.log"
-    return "distccd-mirror-%d.log" % port
+        return "minicc-distccd.log"
+    return "minicc-distccd-%d.log" % port
 
 
 def agent_action(cfg, h, action, stdin_extra="", extra=()):
@@ -1484,7 +1511,7 @@ def cmd_brew_parity(args):
         if not args.apply:
             if miss or diff:
                 info("\nTo copy the missing kegs at this machine's versions "
-                     "(then link and pin them):\n  distcc-mirror brew-parity "
+                     "(then link and pin them):\n  minicc brew-parity "
                      "--apply%s" % ("" if not diff else
                                     "\nTo also replace the %d at other "
                                     "versions: add --different" % len(diff)))
@@ -1525,7 +1552,7 @@ def cmd_brew_parity(args):
 
 def main():
     p = argparse.ArgumentParser(
-        prog="distcc-mirror",
+        prog="minicc",
         description=__doc__.split("\n\n", 1)[0],
         epilog=__doc__.split("\n\n", 1)[1],
         formatter_class=argparse.RawDescriptionHelpFormatter)
