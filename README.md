@@ -11,8 +11,9 @@ The roles do not depend on Mac model or chip generation. It is based on
 [distcc/distcc](https://github.com/distcc/distcc) (3.4 plus later upstream
 commits). Without the new options it behaves like upstream distcc and talks
 to upstream daemons. The binaries keep their upstream names (`distcc`,
-`distccd`); minicc installs into its own prefix, uses its own port and
-state directory, and coexists with a stock distcc install.
+`distccd`); installed and run through the `minicc` tool, it uses its own
+prefix, port (3634) and state directory, and coexists with a stock
+distcc install.
 
 Upgrading from the pre-rename `distcc-mirror` tool: configs in
 `~/.config/distcc-mirror/` are still read (move them to
@@ -364,6 +365,7 @@ On the main Mac:
 
 ```sh
 export PATH="$HOME/.local/minicc/bin:$PATH"
+export DISTCC_DIR="$HOME/.minicc"     # keep this fork's state out of ~/.distcc
 REMOTE_SSH=remote-mac
 REMOTE_ADDR=$(ssh -G "$REMOTE_SSH" | awk '/^hostname / {print $2; exit}')
 REMOTE_JOBS=$(ssh "$REMOTE_SSH" 'cores=$(sysctl -n hw.ncpu); echo $((cores + 2))')

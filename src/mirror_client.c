@@ -860,7 +860,7 @@ static int write_whole_file(const char *fname, const char *buf, size_t len)
  * system. */
 static int sibling_tmpnam(const char *fname, char **tmp)
 {
-    if (asprintf(tmp, "%s.distcc-mirror-%ld.tmp", fname, (long) getpid()) < 0) {
+    if (asprintf(tmp, "%s.minicc-%ld.tmp", fname, (long) getpid()) < 0) {
         *tmp = NULL;
         return EXIT_OUT_OF_MEMORY;
     }
