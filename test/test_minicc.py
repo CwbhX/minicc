@@ -13,13 +13,13 @@ import unittest
 from unittest import mock
 
 
-TOOL = Path(__file__).resolve().parents[1] / "contrib" / "distcc-mirror"
+TOOL = Path(__file__).resolve().parents[1] / "contrib" / "minicc"
 
 
 class MirrorTestStatus(unittest.TestCase):
     def run_test_command(self, results, no_compare=False):
         namespace = runpy.run_path(str(Path(__file__).resolve().parents[1]
-                                      / "contrib" / "distcc-mirror"))
+                                      / "contrib" / "minicc"))
         command = namespace["cmd_test"]
         globals_ = command.__globals__
         helper = types.SimpleNamespace(ssh="helper", addr="localhost", port=3634)
@@ -263,6 +263,55 @@ class MirrorBuildScript(unittest.TestCase):
                                         env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(log.read_text().strip(), expected)
+
+
+class MiniccIdentity(unittest.TestCase):
+    """The minicc rename: own state dir, pre-rename configs still found."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="minicc-identity-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.namespace = runpy.run_path(str(TOOL))
+        self.globals = self.namespace["Config"].__init__.__globals__
+
+    def config(self, extra=""):
+        path = self.root / "project.conf"
+        path.write_text(
+            "ROOTS=%s\nBUILD_DIR=%s\nHELPERS=\"node=198.51.100.2/4\"\n"
+            "LOCAL_JOBS=3\n%s" % (self.root, self.root, extra))
+        return self.namespace["Config"](str(path))
+
+    def test_state_dir_defaults_to_minicc_home(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DISTCC_DIR", None)
+            cfg = self.config()
+            self.assertEqual(cfg.env()["DISTCC_DIR"],
+                             os.path.join(self.globals["HOME"], ".minicc"))
+
+    def test_state_dir_respects_environment_and_config(self):
+        with mock.patch.dict(os.environ, {"DISTCC_DIR": "/from/env"}):
+            self.assertEqual(self.config().env()["DISTCC_DIR"], "/from/env")
+            cfg = self.config("DISTCC_DIR=/from/config\n")
+            self.assertEqual(cfg.env()["DISTCC_DIR"], "/from/config")
+
+    def test_legacy_config_dir_is_read_as_fallback(self):
+        new = self.root / "minicc"
+        legacy = self.root / "distcc-mirror"
+        new.mkdir()
+        legacy.mkdir()
+        (legacy / "old.conf").write_text("")
+        (legacy / "both.conf").write_text("")
+        (new / "both.conf").write_text("")
+        with mock.patch.dict(self.globals, CONFIG_DIR=str(new),
+                             LEGACY_CONFIG_DIR=str(legacy)):
+            paths = self.namespace["all_config_paths"]()
+            self.assertEqual([os.path.basename(p) for p in paths],
+                             ["both.conf", "old.conf"])
+            self.assertEqual(self.namespace["config_path_for"]("old"),
+                             str(legacy / "old.conf"))
+            self.assertEqual(self.namespace["config_path_for"]("both"),
+                             str(new / "both.conf"))
 
 
 if __name__ == "__main__":

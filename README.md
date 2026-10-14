@@ -1,15 +1,24 @@
-# distcc (mirror-mode fork)
+# minicc
 
-A distributed C/C++ compiler: distcc spreads the compile jobs of a build
+A distributed C/C++ compiler: minicc spreads the compile jobs of a build
 across several machines on a network. Its output is the same as a local
 compile's.
 
-This fork targets a **main Mac** running builds and a **remote Mac**
+minicc is a personal fork of distcc, named for the pair of Mac minis it
+was built for. It targets a **main Mac** running builds and a **remote Mac**
 contributing compilation capacity over a **Thunderbolt 4 network bridge**.
 The roles do not depend on Mac model or chip generation. It is based on
 [distcc/distcc](https://github.com/distcc/distcc) (3.4 plus later upstream
 commits). Without the new options it behaves like upstream distcc and talks
-to upstream daemons.
+to upstream daemons. The binaries keep their upstream names (`distcc`,
+`distccd`); minicc installs into its own prefix, uses its own port and
+state directory, and coexists with a stock distcc install.
+
+Upgrading from the pre-rename `distcc-mirror` tool: configs in
+`~/.config/distcc-mirror/` are still read (move them to
+`~/.config/minicc/` when convenient, and update `PREFIX` if it points at
+the old install), `bin/distcc-mirror` remains as a symlink to `minicc`,
+and `minicc helper install` retires the old LaunchAgent on the helper.
 
 - [Quick start](#quick-start)
 - [What's new in this fork](#whats-new-in-this-fork)
@@ -18,7 +27,7 @@ to upstream daemons.
 - [Installing](#installing)
 - [Setting up a project](#setting-up-a-project)
 - [Building](#building)
-- [distcc-mirror commands](#distcc-mirror-commands)
+- [minicc commands](#minicc-commands)
 - [Doing it by hand](#doing-it-by-hand)
 - [Configuration reference](#configuration-reference)
 - [Troubleshooting](#troubleshooting)
@@ -37,16 +46,16 @@ remote Mac's Thunderbolt Bridge address; use your own SSH alias or address.
 On the main Mac:
 
 ```sh
-git clone https://github.com/CwbhX/distcc.git && cd distcc
+git clone https://github.com/CwbhX/minicc.git && cd minicc
 brew install autoconf automake pkgconf popt
-contrib/distcc-mirror install --helper remote-mac        # build and install on both Macs
-export PATH="$HOME/.local/distcc-mirror/bin:$PATH"
+contrib/minicc install --helper remote-mac        # build and install on both Macs
+export PATH="$HOME/.local/minicc/bin:$PATH"
 
 cd ~/src/MyProject                               # a CMake + Ninja project
-distcc-mirror init --helper remote-mac --build build     # writes ~/.config/distcc-mirror/myproject.conf
-distcc-mirror helper install                     # starts the remote daemon (LaunchAgent)
-distcc-mirror doctor                             # checks that both Macs match
-distcc-mirror build                              # PCHs, sync, then use both Macs
+minicc init --helper remote-mac --build build     # writes ~/.config/minicc/myproject.conf
+minicc helper install                     # starts the remote daemon (LaunchAgent)
+minicc doctor                             # checks that both Macs match
+minicc build                              # PCHs, sync, then use both Macs
 ```
 
 Every step works out the details itself (addresses, slot counts, ccache,
@@ -60,7 +69,7 @@ overrides are optional; no Mac model selects a different policy.
 | Feature | What it does |
 |---|---|
 | **Mirrored-tree mode** (`,mirror`, protocol 4) | A helper that has a copy of the source tree at the same path compiles in that copy. The client sends no source and runs no preprocessor. It checks file contents, directory identities, actual header lookups and header aliases before accepting the object. Precompiled headers (PCHs) work remotely. |
-| **`distcc-mirror`** | One command for the whole setup: install on both Macs, write a project config, run the helper daemon as a LaunchAgent, check that the machines match, sync, build, and test-compile against local results. |
+| **`minicc`** | One command for the whole setup: install on both Macs, write a project config, run the helper daemon as a LaunchAgent, check that the machines match, sync, build, and test-compile against local results. |
 | **`distcc --mirror-sync`** | Copies the working tree to the mirror helpers with rsync. Uncommitted edits are included, and no git is involved. Build trees are filtered to sources, headers and PCHs. |
 | **Write confinement** | On the helper, each mirrored compile runs in a macOS Seatbelt sandbox. It can write only to its own job directory and has no network access. The daemon refuses to start in mirror mode if confinement doesn't work. |
 | **Safe fallback** | If a check fails, the helper refuses, or the compile fails in the mirror, the mirror result is discarded and the job is sent the classic way to the same helper. The helper is not marked bad. |
@@ -139,17 +148,17 @@ libpopt-dev`, then the manual steps below).
 From the source tree, on the main Mac:
 
 ```sh
-contrib/distcc-mirror install --helper remote-mac
+contrib/minicc install --helper remote-mac
 ```
 
 This runs `autogen.sh` and `configure` if needed, builds with popt linked
-statically, and installs into `~/.local/distcc-mirror`. That includes
-`distcc`, `distccd`, the `distcc-mirror` tool, the macOS
+statically, and installs into `~/.local/minicc`. That includes
+`distcc`, `distccd`, the `minicc` tool, the macOS
 `lib/distcc-mirror-trace.dylib` observer and the compiler whitelist
 the daemon requires. It then copies the install to each `--helper` over
 ssh. Run it again after pulling changes; once a project is set up, it
 copies to that project's helpers and restarts their daemons. Add
-`~/.local/distcc-mirror/bin` to your `PATH`.
+`~/.local/minicc/bin` to your `PATH`.
 
 Options: `--prefix DIR`, `--pump` (also build pump mode),
 `--no-build` (only copy what is built), `--local-only`.
@@ -159,14 +168,14 @@ Options: `--prefix DIR`, `--pump` (also build pump mode),
 
 ```sh
 ./autogen.sh
-./configure --prefix="$HOME/.local/distcc-mirror" --disable-pump-mode
+./configure --prefix="$HOME/.local/minicc" --disable-pump-mode
 make LIBS="$(brew --prefix popt)/lib/libpopt.a -liconv"   # popt linked statically
 make install
-mkdir -p ~/.local/distcc-mirror/lib/distcc                # compiler whitelist
+mkdir -p ~/.local/minicc/lib/distcc                # compiler whitelist
 for c in cc c++ gcc g++ clang clang++; do
-  ln -sf ../../bin/distcc ~/.local/distcc-mirror/lib/distcc/$c
+  ln -sf ../../bin/distcc ~/.local/minicc/lib/distcc/$c
 done
-rsync -a ~/.local/distcc-mirror/ remote-mac:.local/distcc-mirror/  # same build on the helper
+rsync -a ~/.local/minicc/ remote-mac:.local/minicc/  # same build on the helper
 ```
 
 On Linux a plain `make` is enough. Leave out `--disable-pump-mode` to get
@@ -181,10 +190,10 @@ pump mode.
 From inside the project:
 
 ```sh
-distcc-mirror init --helper remote-mac --build build
+minicc init --helper remote-mac --build build
 ```
 
-This writes `~/.config/distcc-mirror/<project>.conf`. Nothing is written
+This writes `~/.config/minicc/<project>.conf`. Nothing is written
 into the project itself. `init` works out:
 
 - the root (the git work tree);
@@ -221,14 +230,14 @@ HELPERS="remote-mac"                 # remote cores + 2, queried over SSH
 # LOCAL_JOBS is omitted: main Mac cores + 2
 PORT=3634
 CLIENT_ADDR=198.51.100.1
-PREFIX=~/.local/distcc-mirror
-CCACHE_PREFIX=~/.local/distcc-mirror/bin/distcc
+PREFIX=~/.local/minicc
+CCACHE_PREFIX=~/.local/minicc/bin/distcc
 ```
 
 ### 2. Start the helper daemon
 
 ```sh
-distcc-mirror helper install
+minicc helper install
 ```
 
 This installs a LaunchAgent on each helper, so the daemon survives
@@ -236,12 +245,12 @@ reboots. It is configured with `--allow` for this Mac only, the project
 roots as `--mirror-root`s, and its own log file. If several project
 configs name the same helper, one daemon serves all their roots. A daemon
 you started by hand on the same port is replaced. Manage it with
-`distcc-mirror helper status|log|restart|stop|start|uninstall`.
+`minicc helper status|log|restart|stop|start|uninstall`.
 
 ### 3. Check that both Macs match
 
 ```sh
-distcc-mirror doctor
+minicc doctor
 ```
 
 `doctor` checks this Mac and each helper, and prints the fix for every
@@ -264,8 +273,8 @@ confirm that jobs actually compile in the mirror.
 which may not match yours. Use this instead:
 
 ```sh
-distcc-mirror brew-parity           # what differs
-distcc-mirror brew-parity --apply   # copy the missing kegs at your versions, link and pin them
+minicc brew-parity           # what differs
+minicc brew-parity --apply   # copy the missing kegs at your versions, link and pin them
 ```
 
 `--apply --different` also replaces kegs that are at other versions on the
@@ -279,9 +288,9 @@ observer's audited set (`MIRR 3`); see [How the three modes work](#how-the-three
 ## Building
 
 ```sh
-distcc-mirror build                 # PCHs, sync, ninja -j<all slots>
-distcc-mirror build -- my_target    # arguments after -- go to ninja
-distcc-mirror test -n 10            # compile 10 random files on the helper and compare with local compiles
+minicc build                 # PCHs, sync, ninja -j<all slots>
+minicc build -- my_target    # arguments after -- go to ninja
+minicc test -n 10            # compile 10 random files on the helper and compare with local compiles
 ```
 
 `build` first builds the precompiled headers locally, because the helper
@@ -294,9 +303,9 @@ no PCH step).
 For other build commands, use the same environment:
 
 ```sh
-distcc-mirror sync && distcc-mirror run -- make -j31
-eval "$(distcc-mirror env)"         # or put it in your shell
-distcc-mirror shell                 # a subshell with it
+minicc sync && minicc run -- make -j31
+eval "$(minicc env)"         # or put it in your shell
+minicc shell                 # a subshell with it
 ```
 
 `test` is the quickest way to see whether mirror mode works for a project.
@@ -310,7 +319,7 @@ and object comparison, but compilation failures still cause a nonzero exit.
 A successful classic fallback is reported and does not itself fail the
 command, so a zero exit status does not prove that every job was mirrored.
 
-## distcc-mirror commands
+## minicc commands
 
 | Command | What it does |
 |---|---|
@@ -325,11 +334,11 @@ command, so a zero exit status does not prove that every job was mirrored.
 | `show` | Print the config and the environment it gives |
 | `env`, `run CMD`, `shell` | Use that environment for anything else |
 
-`distcc-mirror COMMAND --help` lists every option.
+`minicc COMMAND --help` lists every option.
 
 ## Doing it by hand
 
-`distcc-mirror` only writes a LaunchAgent and runs the commands below.
+`minicc` only writes a LaunchAgent and runs the commands below.
 Here they are, if you want to see or script them yourself.
 
 <details>
@@ -342,10 +351,10 @@ different port lets it run next to an upstream daemon on 3632):
 MAIN_ADDR=198.51.100.1                # replace with the main Mac's bridge IP
 REMOTE_ADDR=198.51.100.2              # replace with this Mac's bridge IP
 REMOTE_JOBS=$(( $(sysctl -n hw.ncpu) + 2 ))
-~/.local/distcc-mirror/bin/distccd --daemon \
+~/.local/minicc/bin/distccd --daemon \
   --listen "$REMOTE_ADDR" --port 3634 --allow "$MAIN_ADDR/32" \
   --jobs "$REMOTE_JOBS" --mirror-root "$HOME/Git/MyProject" \
-  --log-file ~/Library/Logs/distccd-mirror.log
+  --log-file ~/Library/Logs/minicc-distccd.log
 ```
 
 The daemon first checks that it can confine a compiler, and refuses to
@@ -354,7 +363,7 @@ start if it can't. Add `--no-detach` when running it under launchd.
 On the main Mac:
 
 ```sh
-export PATH="$HOME/.local/distcc-mirror/bin:$PATH"
+export PATH="$HOME/.local/minicc/bin:$PATH"
 REMOTE_SSH=remote-mac
 REMOTE_ADDR=$(ssh -G "$REMOTE_SSH" | awk '/^hostname / {print $2; exit}')
 REMOTE_JOBS=$(ssh "$REMOTE_SSH" 'cores=$(sysctl -n hw.ncpu); echo $((cores + 2))')
@@ -424,6 +433,7 @@ after changing machines.
 
 | Variable | Meaning |
 |---|---|
+| `DISTCC_DIR` | Host list, locks, state and mirror caches. `minicc` sets it to `~/.minicc` (unless already set) so a stock distcc's `~/.distcc` is untouched; note slot locks are then not shared if both run at once. |
 | `DISTCC_MIRROR_ROOTS` | Colon-separated synced source roots. Jobs whose cwd is outside them use classic mode. This is also what `--mirror-sync` copies. |
 | `DISTCC_MIRROR_EXCLUDE` | Globs left out at the top of each root, both by the sync and by the directory comparison. |
 | `DISTCC_MIRROR_PATHMAP` | `physical=logical` prefix pairs, colon-separated. The logical sides are treated as build trees: only sources, headers and PCHs there are synced and compared. |
@@ -451,24 +461,24 @@ after changing machines.
 | Command | Meaning |
 |---|---|
 | `distcc --mirror-sync [HOST...]` | Copy the roots, build trees and extra trees to the given hosts, or to `DISTCC_MIRROR_SSH`. Files deleted locally are deleted on the helper too. |
-| `distcc-mirror ...` | The setup tool; see [distcc-mirror commands](#distcc-mirror-commands). |
+| `minicc ...` | The setup tool; see [minicc commands](#minicc-commands). |
 
 ## Troubleshooting
 
-- **Start with** `distcc-mirror doctor`, then `distcc-mirror test -n 10`.
+- **Start with** `minicc doctor`, then `minicc test -n 10`.
   `test` shows, per file, whether it was mirrored and why not.
 - **See what happened to each job in a build:** run with `DISTCC_VERBOSE=1`
   (or set `DISTCC_LOG`). For mirror jobs, the log shows whether the job was
   accepted, or which check failed and why it fell back.
-- **Helper daemon:** `distcc-mirror helper status` and
-  `distcc-mirror helper log`.
+- **Helper daemon:** `minicc helper status` and
+  `minicc helper log`.
 - **Daemon side:** add `--log-level debug` and read the `--log-file`.
 - **Every job falls back with a refusal code** (`MIRR`):
 
   | Code | Meaning | Usual fix |
   |---|---|---|
   | 1 | The cwd or input is not under a `--mirror-root` | Check `--mirror-root` and `DISTCC_MIRROR_ROOTS` |
-  | 2 | A file on the check list differs | `distcc-mirror sync` (rebuild PCHs first; `distcc-mirror build` does both) |
+  | 2 | A file on the check list differs | `minicc sync` (rebuild PCHs first; `minicc build` does both) |
   | 3 | The argument, compiler or filesystem observation is unsupported | Read the reason: an unsupported option/compiler, missing observer library or incomplete trace causes classic fallback |
   | 4 | The cwd or input is missing on the helper | Sync, or fix the path map |
   | 5 | Confinement failed on the helper | Check the daemon log |
@@ -484,8 +494,8 @@ after changing machines.
   directory, optional-header lookup or header alias differs between the
   machines. A header that exists on only one machine can change
   `__has_include` even if it is absent from the dependency file. The verbose
-  log and `distcc-mirror test` name the mismatch. Sync the source/build
-  trees; use `distcc-mirror brew-parity` for Homebrew differences.
+  log and `minicc test` name the mismatch. Sync the source/build
+  trees; use `minicc brew-parity` for Homebrew differences.
 - **Caches:** `$DISTCC_DIR/mirror-digests` (file digests) and
   `$DISTCC_DIR/mirror-searchpath` (the compiler's search paths) can be
   deleted at any time.
@@ -532,7 +542,7 @@ cycles. It has been used with hundreds of helpers and dozens of
 simultaneous compiles.
 
 - Upstream: <https://github.com/distcc/distcc>, <https://distcc.github.io/>
-- This fork: <https://github.com/CwbhX/distcc> (branch `mac-pool-perf`)
+- This fork: <https://github.com/CwbhX/minicc>
 
 ## Licence
 
