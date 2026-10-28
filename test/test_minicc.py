@@ -239,6 +239,59 @@ class MirrorCapacity(unittest.TestCase):
                 self.assertEqual(run.call_args.args[0],
                                  ["ninja", "-C", config.build_dir] + expected)
 
+    def test_build_syncs_pch_waves_only_after_changes(self):
+        # CMake's Ninja generator makes a PCH wait for whole libraries whose
+        # objects use earlier PCHs.  Built in one local step, a kicommon
+        # header edit compiled ~300 files on the main Mac alone.  Each wave
+        # after the first must use every slot, and a build with nothing to
+        # do must still sync only once.
+        build = self.root / "build"
+        (build / "build.ninja").touch()
+        a, b, c = ("a.dir/cmake_pch.hxx.pch", "b.dir/cmake_pch.hxx.pch",
+                   "c.dir/cmake_pch.hxx.pch")
+        inputs = {a: [], b: [a, "b.h"], c: [a, b, "liba.dylib"]}
+        config = types.SimpleNamespace(
+            build_dir=str(build), full_env=lambda: {}, total_jobs=lambda: 34,
+            helpers=[types.SimpleNamespace(ssh="helper")])
+        command = self.namespace["cmd_build"]
+        for writes, syncs_after in (({a: [a], b: [b], c: ["c.o"]}, [a, b]),
+                                    ({a: [], b: [], c: ["liba.dylib"]}, [a])):
+            with self.subTest(writes=writes):
+                calls = []
+
+                def run(argv, **kwargs):
+                    if "-t" in argv:
+                        out = ("%s: CXX\n" * 3 % (a, b, c)
+                               if argv[-1] == "all"
+                               else "\n".join(inputs[argv[-1]]) + "\n")
+                        return subprocess.CompletedProcess(argv, 0, out, "")
+                    calls.append(argv[3:])
+                    # Ninja logs every output it builds; touch them so
+                    # their mtimes are newer than the wave's start.
+                    for out in writes.get(argv[-1], []):
+                        (build / out).parent.mkdir(exist_ok=True)
+                        (build / out).touch()
+                        with open(build / ".ninja_log", "a") as log:
+                            log.write("0\t1\t0\t%s\t0\n" % out)
+                    return subprocess.CompletedProcess(argv, 0)
+
+                args = types.SimpleNamespace(build_dir=None, ninja_args=[],
+                                             no_pch=False, no_sync=False)
+                with mock.patch.dict(self.globals, load_config=lambda _: config,
+                                     do_sync=lambda _: calls.append("sync")), \
+                        mock.patch.object(subprocess, "run", side_effect=run), \
+                        contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        command(args)
+                expected = []
+                for i, pch in enumerate((a, b, c)):
+                    expected.append(([] if i == 0 else ["-j34"]) + [pch])
+                    if pch in syncs_after:
+                        expected.append("sync")
+                expected.append(["-j34"])
+                self.assertEqual(calls, expected)
+
 
 class MirrorBuildScript(unittest.TestCase):
     def test_combined_distcc_slots_and_manual_override(self):

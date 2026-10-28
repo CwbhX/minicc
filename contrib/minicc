@@ -52,6 +52,7 @@ Run "minicc COMMAND --help" for the options of each command.
 """
 
 import argparse
+import fnmatch
 import glob
 import json
 import os
@@ -894,6 +895,94 @@ def pch_targets(build_dir, env):
     return out
 
 
+def pch_waves(build_dir, pchs, env):
+    """Group the PCHs into waves; a PCH comes after every PCH in its inputs.
+
+    Building one PCH builds everything it depends on.  With CMake's Ninja
+    generator that can be whole libraries: a target's custom commands wait
+    for all its link dependencies, so its PCH does too.  Those libraries'
+    objects use the earlier PCHs, which the helpers only have once they are
+    synced, so a wave can compile on the helpers only after the waves
+    before it are synced.  One wave when ninja cannot list the inputs."""
+    after = {}
+    for p in pchs:
+        r = subprocess.run(["ninja", "-C", build_dir, "-t", "inputs", p],
+                           capture_output=True, text=True, env=env)
+        if r.returncode != 0:
+            return [pchs]
+        inputs = set(r.stdout.splitlines())
+        after[p] = [q for q in pchs if q != p and q in inputs]
+    level = {}
+
+    def depth(p, seen=()):
+        if p not in level:
+            if p in seen:       # a cycle; ninja itself would refuse it
+                return 0
+            level[p] = 1 + max((depth(q, seen + (p,)) for q in after[p]),
+                               default=-1)
+        return level[p]
+
+    waves = {}
+    for p in pchs:
+        waves.setdefault(depth(p), []).append(p)
+    return [waves[k] for k in sorted(waves)]
+
+
+def ninja_log_size(build_dir):
+    try:
+        return os.path.getsize(os.path.join(build_dir, ".ninja_log"))
+    except OSError:
+        return 0
+
+
+# The build-tree files distcc --mirror-sync copies (src/mirror_sync.c).
+SYNCED_BUILD_FILES = (
+    "*.h", "*.hh", "*.hpp", "*.hxx", "*.h++", "*.inc", "*.inl", "*.ipp",
+    "*.tpp", "*.tcc", "*.def", "*.c", "*.cc", "*.cpp", "*.cxx", "*.c++",
+    "*.m", "*.mm", "*.pch", "*.gch", "cmake_pch.*")
+
+
+def wrote_since(build_dir, log_offset, start):
+    """Whether ninja changed a file the sync copies since START, judged by
+    the outputs it logged after LOG_OFFSET: build-tree sources, headers and
+    PCHs, and anything outside the build tree (generated into a source
+    root).  Objects and libraries are not synced.  Outputs ninja restats
+    but does not change, and the symbolic outputs of CMake's always-run
+    targets, do not count.  Without a log, assume it did."""
+    try:
+        with open(os.path.join(build_dir, ".ninja_log"), "rb") as f:
+            f.seek(log_offset)
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return True
+    for line in lines:
+        fields = line.split("\t")
+        if line.startswith("#") or len(fields) < 4:
+            continue
+        path = os.path.normpath(os.path.join(build_dir, fields[3]))
+        in_build = under(path, build_dir)
+        if in_build and not any(fnmatch.fnmatchcase(os.path.basename(path), g)
+                                for g in SYNCED_BUILD_FILES):
+            continue
+        try:
+            # Whole seconds: some filesystems store no finer mtimes.
+            if os.stat(path).st_mtime >= int(start):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def jobs_args(rest):
+    """The -j arguments in ninja arguments REST (-jN or -j N)."""
+    for i, a in enumerate(rest):
+        if a == "-j":
+            return rest[i:i + 2]
+        if a.startswith("-j"):
+            return [a]
+    return []
+
+
 def cmd_build(args):
     cfg = load_config(args)
     build = os.path.abspath(args.build_dir or cfg.build_dir or ".")
@@ -905,19 +994,43 @@ def cmd_build(args):
     if not ninja and not os.path.exists(os.path.join(build, "Makefile")):
         die("no build.ninja or Makefile in %s" % build)
     t0 = time.time()
-    if ninja and not args.no_pch:
-        pchs = pch_targets(build, env)
-        if pchs:
-            # The helpers compile against copies of the PCHs, so they are
-            # built (locally) and synced before anything else.
-            step("Building %d precompiled headers" % len(pchs))
-            run(["ninja", "-C", build] + pchs, env=env)
-    if not args.no_sync:
+    has_j = bool(jobs_args(rest))
+    all_slots = jobs_args(rest) or ["-j%d" % cfg.total_jobs()]
+    pchs = pch_targets(build, env) if ninja and not args.no_pch else []
+    if not pchs:
+        waves = []
+    elif args.no_sync:
+        waves = [pchs]
+    else:
+        waves = pch_waves(build, pchs, env)
+    synced = False
+    # The helpers compile against copies of the PCHs, so a PCH is built and
+    # synced before anything that uses it.  The first wave runs before any
+    # sync, so the helpers' copy of the tree is old and its compiles stay
+    # here; later waves use every slot.  A later wave that changed no file
+    # needs no sync after it, so a build with nothing to do syncs once.
+    for i, wave in enumerate(waves):
+        if len(waves) == 1:
+            step("Building %d precompiled headers" % len(wave))
+        else:
+            step("Building precompiled headers, wave %d/%d: %s" % (
+                i + 1, len(waves), " ".join(
+                    os.path.basename(os.path.dirname(p))[:-len(".dir")]
+                    if os.path.dirname(p).endswith(".dir") else p
+                    for p in wave)))
+        offset, start = ninja_log_size(build), time.time()
+        run(["ninja", "-C", build] + (all_slots if i else []) + wave,
+            env=env)
+        if not args.no_sync and (not synced
+                                 or wrote_since(build, offset, start)):
+            step("Syncing to %s" % " ".join(h.ssh for h in cfg.helpers))
+            do_sync(cfg)
+            synced = True
+    if not args.no_sync and not synced:
         step("Syncing to %s" % " ".join(h.ssh for h in cfg.helpers))
         do_sync(cfg)
     t1 = time.time()
-    has_j = any(a.startswith("-j") for a in rest)
-    jobs = [] if has_j else ["-j%d" % cfg.total_jobs()]
+    jobs = [] if has_j else all_slots
     tool = ["ninja", "-C", build] if ninja else ["make", "-C", build]
     step("Building (%s)" % (" ".join(jobs + rest) or "all"))
     r = subprocess.run(tool + jobs + rest, env=env)

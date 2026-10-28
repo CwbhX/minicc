@@ -337,12 +337,27 @@ minicc build -- my_target    # arguments after -- go to ninja
 minicc test -n 10            # compile 10 random files on the helper and compare with local compiles
 ```
 
-`build` first builds the precompiled headers locally, because the helper
+`build` first builds the precompiled headers, because the helper
 compiles against copies of them. Then it syncs the tree (about 3 s when
 little changed, 11 s for a first copy of 2 GB over Thunderbolt), and runs
 ninja with as many jobs as all the slots together. It accepts `--no-sync`,
 `--no-pch` and `-C DIR`. For Make projects it runs `make` instead (there is
 no PCH step).
+
+Building a PCH builds everything it depends on, and with CMake's Ninja
+generator that can be whole libraries: a target's custom commands (lexer,
+shader or resource generators) wait for all of its link dependencies, so
+its PCH does too. Those libraries' objects use other PCHs. So `build`
+orders the PCHs in waves with `ninja -t inputs`: a PCH comes after every
+PCH among its inputs. The first wave builds before the sync, on this Mac.
+Each later wave runs with all the slots, after the sync of the waves
+before it. `build` syncs again after a later wave only when that wave
+changed a file the sync copies (a source, header or PCH in the build tree,
+or a file generated into a source root, as listed in `.ninja_log`), so a
+build with nothing to do still syncs once. In one KiCad-derived tree, a
+header edit under its base library made the PCH step compile about 300
+files on the main Mac alone; with waves most of them run on the helper.
+`--no-sync` builds all the PCHs in one step.
 
 For other build commands, use the same environment:
 
